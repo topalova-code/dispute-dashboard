@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>Ledger — Win Rate Dashboard</title>
@@ -152,6 +152,17 @@
   .pct-track{ width:52px; height:6px; background:var(--panel-2); border-radius:3px; overflow:hidden; }
   .pct-fill{ height:100%; background:linear-gradient(90deg, var(--brand-2), var(--brand)); }
 
+  .issuer-row{
+    display:flex; justify-content:space-between; align-items:center; gap:10px;
+    padding:9px 0; border-bottom:1px solid var(--line); font-size:12.5px;
+  }
+  .issuer-row:last-child{ border-bottom:none; }
+  .issuer-row .name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px; }
+  .issuer-row .count{ font-family:var(--mono); font-size:11.5px; flex-shrink:0; }
+  .issuer-row.best .count{ color:var(--win); }
+  .issuer-row.worst .count{ color:var(--loss); }
+  .empty-row{ color:var(--muted); font-family:var(--mono); font-size:11.5px; padding:8px 0; }
+
   .footer-note{ margin-top:28px; font-family:var(--mono); font-size:11px; color:var(--muted); text-align:center; }
 
   @media (max-width:820px){
@@ -169,61 +180,138 @@
       <h1 id="fileTitle">Win Rate Dashboard</h1>
     </div>
     <label class="upload-btn" id="uploadLabel">
-      Загрузить файл (.xlsx / .csv)
+      Upload file (.xlsx / .csv)
       <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
     </label>
   </header>
 
   <div id="emptyState" class="empty">
     <div class="stamp">NO DATA LOADED</div>
-    <h2>Загрузите таблицу с диспутами</h2>
-    <p>Экспортируйте вашу Google Sheets таблицу как .xlsx (со всеми месячными вкладками) или .csv — дашборд сам построит вкладки по месяцам, посчитает win rate, разбивку по типу диспута и reason code.</p>
-    <label class="drop" for="fileInput">выбрать файл →</label>
+    <h2>Upload your disputes spreadsheet</h2>
+    <p>Export your Google Sheets file as .xlsx (with all monthly tabs) or .csv — the dashboard will build the month tabs, compute win rate, and break down disputes by type and reason code.</p>
+    <label class="drop" for="fileInput">choose file →</label>
   </div>
 
   <div id="dashboard" style="display:none">
     <div class="tabs" id="monthTabs"></div>
 
+    <div class="panel" style="margin-bottom:18px;">
+      <h3>Win rate across all loaded months</h3>
+      <canvas id="overallTrendChart"></canvas>
+    </div>
+
     <div class="kpis">
-      <div class="kpi win"><div class="label">Win rate</div><div class="value" id="kpiWinRate">—</div><div class="sub" id="kpiWinRateSub">—</div><div class="bar"></div></div>
-      <div class="kpi win"><div class="label">Won</div><div class="value" id="kpiWon">—</div><div class="sub">кейсов</div><div class="bar"></div></div>
-      <div class="kpi loss"><div class="label">Lost</div><div class="value" id="kpiLost">—</div><div class="sub">кейсов</div><div class="bar"></div></div>
-      <div class="kpi pending"><div class="label">Pending</div><div class="value" id="kpiPending">—</div><div class="sub">на рассмотрении</div><div class="bar"></div></div>
+      <div class="kpi"><div class="label">Total disputes</div><div class="value" id="kpiTotal">—</div><div class="sub" id="kpiTotalSub">—</div></div>
+      <div class="kpi win"><div class="label">Win rate (Reversed)</div><div class="value" id="kpiWinRate">—</div><div class="sub" id="kpiWinRateSub">—</div></div>
+      <div class="kpi loss"><div class="label">Accepted (lost)</div><div class="value" id="kpiLost">—</div><div class="sub">cases</div></div>
+      <div class="kpi pending"><div class="label">Pending</div><div class="value" id="kpiPending">—</div><div class="sub" id="kpiPendingSub">under review</div></div>
     </div>
 
     <div class="grid2">
       <div class="panel">
-        <h3>Won / Lost по типу диспута</h3>
-        <canvas id="typeChart"></canvas>
+        <h3>Win rate by descriptor</h3>
+        <table class="data" id="descriptorTable">
+          <thead><tr><th>Descriptor</th><th class="num">Won</th><th class="num">Lost</th><th class="num">Win rate</th></tr></thead>
+          <tbody></tbody>
+        </table>
       </div>
       <div class="panel">
-        <h3>Статусы</h3>
-        <canvas id="statusChart"></canvas>
+        <h3>Win rate by country</h3>
+        <table class="data" id="countryTable">
+          <thead><tr><th>Country</th><th class="num">Won</th><th class="num">Lost</th><th class="num">Win rate</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="panel">
+        <h3>Win rate by Card Brand</h3>
+        <canvas id="brandChart"></canvas>
+      </div>
+      <div class="panel">
+        <h3>1st vs 2nd chargeback</h3>
+        <table class="data" id="chbTypeTable">
+          <thead><tr><th>Type</th><th class="num">Won</th><th class="num">Lost</th><th class="num">Win rate</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="panel">
+        <h3>Reason code / group — Won vs Lost</h3>
+        <canvas id="reasonChart"></canvas>
+      </div>
+      <div class="panel">
+        <h3>Reason breakdown</h3>
+        <table class="data" id="reasonTable">
+          <thead><tr><th>Reason</th><th class="num">Won</th><th class="num">Lost</th><th class="num">Win rate</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="panel">
+        <h3>Disputes after refund</h3>
+        <div class="kpis" style="grid-template-columns:repeat(2,1fr); margin-bottom:0;">
+          <div class="kpi"><div class="label">Count</div><div class="value" id="kpiRefundCount">—</div><div class="sub" id="kpiRefundSub">of all disputes</div></div>
+          <div class="kpi win"><div class="label">Win rate within</div><div class="value" id="kpiRefundWinRate">—</div><div class="sub">among these cases</div></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Card Issuer — Best / Worst</h3>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+          <div>
+            <div style="font-family:var(--mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.1em; color:var(--win); margin-bottom:8px;">Best (more Reversed)</div>
+            <div id="bestIssuers"></div>
+          </div>
+          <div>
+            <div style="font-family:var(--mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.1em; color:var(--loss); margin-bottom:8px;">Worst (more Accepted)</div>
+            <div id="worstIssuers"></div>
+          </div>
+        </div>
       </div>
     </div>
 
     <div class="panel" style="margin-bottom:16px;">
-      <h3>Win rate по reason code</h3>
-      <table class="data" id="reasonTable">
-        <thead><tr><th>Reason code</th><th class="num">Won</th><th class="num">Lost</th><th class="num">Win rate</th></tr></thead>
-        <tbody></tbody>
-      </table>
+      <h3>Processing speed</h3>
+      <div class="kpis" style="grid-template-columns:repeat(2,1fr); margin-bottom:0;">
+        <div class="kpi"><div class="label">Average case time</div><div class="value" id="kpiAvgDays">—</div><div class="sub">Created → Updated, days</div></div>
+        <div class="kpi loss"><div class="label">Near deadline / overdue</div><div class="value" id="kpiDeadlineRisk">—</div><div class="sub" id="kpiDeadlineRiskSub">cases in progress</div></div>
+      </div>
     </div>
 
   </div>
 
-  <div class="footer-note">Данные обрабатываются локально в браузере — файл никуда не отправляется.</div>
+  <div class="footer-note">Data is processed locally in your browser — the file is never uploaded anywhere.</div>
 </div>
 
 <script>
 const state = { sheets: {}, order: [], activeMonth: null, charts: {} };
 
+// Column aliases tuned to the Drama Card Chargebacks export format,
+// with fallbacks for slightly different spellings across months.
 const COLS = {
-  status: ['status','статус'],
-  outcome: ['outcome','результат','итог'],
-  type: ['dispute type','type','тип диспута','тип'],
-  reason: ['reason code','reason','причина','код причины']
+  status:      ['status','статус'],                                   // accepted / reversed / document_sent / in_progress
+  orderStatus: ['order status','order-status','order_status'],        // refunded / settle_ok
+  descriptor:  ['descriptor'],
+  country:     ['ip counrty','ip country','ip-country','country'],    // note: source has a typo "Counrty" in some months
+  reasonCode:  ['reason code','reason  code'],
+  reasonGroup: ['reason group','reason category'],
+  cardIssuer:  ['card issuer','issuer'],
+  cardBrand:   ['card brand','brand'],
+  chbType:     ['type'],                                              // 1st_chb / 2nd_chb
+  createdDate: ['created date'],
+  updatedDate: ['updated date'],
+  deadlineDate:['deadline date']
 };
+
+const WON_STATUSES = ['reversed'];
+const LOST_STATUSES = ['accepted'];
+const PENDING_STATUSES = ['document_sent','in_progress'];
+const REFUND_ORDER_STATUSES = ['refunded'];
 
 function findCol(headers, aliases){
   const norm = h => String(h||'').trim().toLowerCase();
@@ -232,7 +320,6 @@ function findCol(headers, aliases){
     const idx = hs.indexOf(a);
     if(idx !== -1) return headers[idx];
   }
-  // fallback: partial match
   for(const a of aliases){
     const idx = hs.findIndex(h => h.includes(a));
     if(idx !== -1) return headers[idx];
@@ -240,60 +327,169 @@ function findCol(headers, aliases){
   return null;
 }
 
-function classify(row, colMap){
-  const status = String(row[colMap.status]||'').trim().toLowerCase();
-  const outcome = String(row[colMap.outcome]||'').trim().toLowerCase();
-  const resolvedWords = ['resolved','closed','completed'];
-  const isResolved = resolvedWords.some(w => status.includes(w));
-  const wonWords = ['won','win','resolved - won','seller','merchant won'];
-  const lostWords = ['lost','loss','buyer won'];
-  if(isResolved){
-    if(wonWords.some(w => outcome.includes(w))) return 'won';
-    if(lostWords.some(w => outcome.includes(w))) return 'lost';
-  }
-  const pendingWords = ['pending','under review','waiting','open','action required','response needed'];
-  if(pendingWords.some(w => status.includes(w))) return 'pending';
-  if(!isResolved) return 'pending';
+function norm(v){ return String(v==null?'':v).trim().toLowerCase(); }
+
+function classify(statusVal){
+  const s = norm(statusVal);
+  if(WON_STATUSES.includes(s)) return 'won';
+  if(LOST_STATUSES.includes(s)) return 'lost';
+  if(PENDING_STATUSES.includes(s)) return 'pending';
   return 'other';
+}
+
+function bump(map, key, cls){
+  if(cls!=='won' && cls!=='lost') return;
+  map[key] = map[key] || {won:0, lost:0};
+  map[key][cls]++;
+}
+
+function parseDate(v){
+  if(!v) return null;
+  if(v instanceof Date) return isNaN(v) ? null : v;
+  const d = new Date(v);
+  return isNaN(d) ? null : d;
 }
 
 function processSheet(rows){
   if(!rows.length) return null;
   const headers = Object.keys(rows[0]);
   const colMap = {
-    status: findCol(headers, COLS.status),
-    outcome: findCol(headers, COLS.outcome),
-    type: findCol(headers, COLS.type),
-    reason: findCol(headers, COLS.reason)
+    status:      findCol(headers, COLS.status),
+    orderStatus: findCol(headers, COLS.orderStatus),
+    descriptor:  findCol(headers, COLS.descriptor),
+    country:     findCol(headers, COLS.country),
+    reasonCode:  findCol(headers, COLS.reasonCode),
+    reasonGroup: findCol(headers, COLS.reasonGroup),
+    cardIssuer:  findCol(headers, COLS.cardIssuer),
+    cardBrand:   findCol(headers, COLS.cardBrand),
+    chbType:     findCol(headers, COLS.chbType),
+    createdDate: findCol(headers, COLS.createdDate),
+    updatedDate: findCol(headers, COLS.updatedDate),
+    deadlineDate:findCol(headers, COLS.deadlineDate)
   };
-  let won=0, lost=0, pending=0;
-  const byType = {}, byReason = {};
-  const statusCounts = {};
+  if(!colMap.status) return null; // no usable status column — skip this sheet
+
+  let won=0, lost=0, pending=0, other=0;
+  const byDescriptor = {}, byCountry = {}, byReason = {}, byIssuer = {}, byBrand = {}, byChbType = {};
+  let refundTotal=0, refundWon=0, refundLost=0;
+  let daySum=0, dayCount=0, deadlineRisk=0;
+  const now = new Date();
 
   rows.forEach(row => {
-    const cls = classify(row, colMap);
+    const cls = classify(row[colMap.status]);
     if(cls==='won') won++;
     else if(cls==='lost') lost++;
     else if(cls==='pending') pending++;
+    else other++;
 
-    const statusVal = colMap.status ? (String(row[colMap.status]||'Unknown').trim() || 'Unknown') : 'Unknown';
-    statusCounts[statusVal] = (statusCounts[statusVal]||0)+1;
+    const descriptor = colMap.descriptor ? (String(row[colMap.descriptor]||'').trim() || 'Unknown') : 'Unknown';
+    bump(byDescriptor, descriptor, cls);
 
-    if(cls==='won' || cls==='lost'){
-      const t = colMap.type ? (String(row[colMap.type]||'Other').trim() || 'Other') : 'Other';
-      byType[t] = byType[t] || {won:0,lost:0};
-      byType[t][cls]++;
+    const country = colMap.country ? (String(row[colMap.country]||'').trim() || 'Unknown') : 'Unknown';
+    bump(byCountry, country, cls);
 
-      const r = colMap.reason ? (String(row[colMap.reason]||'Unknown').trim() || 'Unknown') : 'Unknown';
-      byReason[r] = byReason[r] || {won:0,lost:0};
-      byReason[r][cls]++;
+    const reason = colMap.reasonGroup ? (String(row[colMap.reasonGroup]||'').trim() || 'Unknown')
+                 : (colMap.reasonCode ? String(row[colMap.reasonCode]||'Unknown').trim() : 'Unknown');
+    bump(byReason, reason, cls);
+
+    const issuer = colMap.cardIssuer ? (String(row[colMap.cardIssuer]||'').trim() || null) : null;
+    if(issuer) bump(byIssuer, issuer, cls);
+
+    const brand = colMap.cardBrand ? (String(row[colMap.cardBrand]||'').trim() || null) : null;
+    if(brand) bump(byBrand, brand, cls);
+
+    const chbType = colMap.chbType ? (String(row[colMap.chbType]||'').trim() || null) : null;
+    if(chbType) bump(byChbType, chbType, cls);
+
+    if(colMap.orderStatus){
+      const os = norm(row[colMap.orderStatus]);
+      if(REFUND_ORDER_STATUSES.includes(os)){
+        refundTotal++;
+        if(cls==='won') refundWon++;
+        else if(cls==='lost') refundLost++;
+      }
+    }
+
+    if(colMap.createdDate && colMap.updatedDate){
+      const c = parseDate(row[colMap.createdDate]);
+      const u = parseDate(row[colMap.updatedDate]);
+      if(c && u){
+        const days = (u-c)/86400000;
+        if(days>=0){ daySum += days; dayCount++; }
+      }
+    }
+    if((cls==='pending') && colMap.deadlineDate){
+      const dl = parseDate(row[colMap.deadlineDate]);
+      if(dl){
+        const daysLeft = (dl-now)/86400000;
+        if(daysLeft <= 7) deadlineRisk++; // due within a week or already overdue
+      }
     }
   });
 
-  return { total: rows.length, won, lost, pending, byType, byReason, statusCounts, colMap };
+  return {
+    total: rows.length, won, lost, pending, other,
+    byDescriptor, byCountry, byReason, byIssuer, byBrand, byChbType,
+    refundTotal, refundWon, refundLost,
+    avgDays: dayCount ? (daySum/dayCount) : null,
+    deadlineRisk,
+    hasIssuerData: Object.keys(byIssuer).length > 0,
+    hasBrandData: Object.keys(byBrand).length > 0,
+    hasChbTypeData: Object.keys(byChbType).length > 0,
+    hasOrderStatus: !!colMap.orderStatus,
+    hasDeadlineData: !!colMap.deadlineDate,
+    colMap
+  };
 }
 
 function fmtPct(n){ return isFinite(n) ? (Math.round(n*10)/10)+'%' : '—'; }
+
+function renderBreakdownTable(tbodyId, map, minCases){
+  const tbody = document.querySelector('#'+tbodyId+' tbody');
+  tbody.innerHTML = '';
+  const keys = Object.keys(map)
+    .filter(k => (map[k].won + map[k].lost) >= (minCases||1))
+    .sort((a,b)=> (map[b].won+map[b].lost) - (map[a].won+map[a].lost))
+    .slice(0, 12);
+  if(!keys.length){
+    tbody.innerHTML = `<tr><td colspan="4" class="empty-row">No data</td></tr>`;
+    return;
+  }
+  keys.forEach(k=>{
+    const {won,lost} = map[k];
+    const tot = won+lost;
+    const pct = tot ? (won/tot*100) : 0;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${k}</td><td class="num">${won}</td><td class="num">${lost}</td>
+      <td class="num"><div class="pct-cell"><span>${fmtPct(pct)}</span><div class="pct-track"><div class="pct-fill" style="width:${pct}%"></div></div></div></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderIssuers(d){
+  const bestEl = document.getElementById('bestIssuers');
+  const worstEl = document.getElementById('worstIssuers');
+  if(!d.hasIssuerData){
+    bestEl.innerHTML = '<div class="empty-row">No Card Issuer column</div>';
+    worstEl.innerHTML = '<div class="empty-row">No Card Issuer column</div>';
+    return;
+  }
+  const issuers = Object.keys(d.byIssuer).map(name=>({
+    name, won: d.byIssuer[name].won, lost: d.byIssuer[name].lost,
+    total: d.byIssuer[name].won + d.byIssuer[name].lost
+  })).filter(i => i.total >= 2);
+
+  const best = [...issuers].sort((a,b)=> b.won - a.won).slice(0,5);
+  const worst = [...issuers].sort((a,b)=> b.lost - a.lost).slice(0,5);
+
+  bestEl.innerHTML = best.length ? best.map(i=>
+    `<div class="issuer-row best"><span class="name">${i.name}</span><span class="count">${i.won} won</span></div>`
+  ).join('') : '<div class="empty-row">Not enough data</div>';
+
+  worstEl.innerHTML = worst.length ? worst.map(i=>
+    `<div class="issuer-row worst"><span class="name">${i.name}</span><span class="count">${i.lost} lost</span></div>`
+  ).join('') : '<div class="empty-row">Not enough data</div>';
+}
 
 function renderMonth(name){
   state.activeMonth = name;
@@ -304,66 +500,117 @@ function renderMonth(name){
   const totalDecided = d.won + d.lost;
   const wr = totalDecided ? (d.won/totalDecided*100) : NaN;
 
+  document.getElementById('kpiTotal').textContent = d.total;
+  document.getElementById('kpiTotalSub').textContent = `${d.won} reversed · ${d.lost} accepted · ${d.pending} pending`;
   document.getElementById('kpiWinRate').textContent = fmtPct(wr);
-  document.getElementById('kpiWinRateSub').textContent = totalDecided ? `из ${totalDecided} решённых` : 'нет решённых';
-  document.getElementById('kpiWon').textContent = d.won;
+  document.getElementById('kpiWinRateSub').textContent = totalDecided ? `of ${totalDecided} decided` : 'no decided cases';
   document.getElementById('kpiLost').textContent = d.lost;
   document.getElementById('kpiPending').textContent = d.pending;
+  document.getElementById('kpiPendingSub').textContent = d.pending ? 'document_sent + in_progress' : 'no pending cases';
 
-  // type chart
-  const types = Object.keys(d.byType).sort((a,b)=> (d.byType[b].won+d.byType[b].lost) - (d.byType[a].won+d.byType[a].lost));
-  if(state.charts.type) state.charts.type.destroy();
-  state.charts.type = new Chart(document.getElementById('typeChart'), {
+  renderBreakdownTable('descriptorTable', d.byDescriptor, 1);
+  renderBreakdownTable('countryTable', d.byCountry, 1);
+  renderBreakdownTable('reasonTable', d.byReason, 1);
+  renderBreakdownTable('chbTypeTable', d.byChbType, 1);
+
+  // card brand chart
+  if(state.charts.brand) state.charts.brand.destroy();
+  if(d.hasBrandData){
+    const brands = Object.keys(d.byBrand)
+      .filter(k => (d.byBrand[k].won + d.byBrand[k].lost) >= 1)
+      .sort((a,b)=> (d.byBrand[b].won+d.byBrand[b].lost) - (d.byBrand[a].won+d.byBrand[a].lost));
+    state.charts.brand = new Chart(document.getElementById('brandChart'), {
+      type:'bar',
+      data:{
+        labels: brands,
+        datasets:[
+          {label:'Won (Reversed)', data: brands.map(b=>d.byBrand[b].won), backgroundColor:'#22d3a5', borderRadius:4},
+          {label:'Lost (Accepted)', data: brands.map(b=>d.byBrand[b].lost), backgroundColor:'#ff5d7a', borderRadius:4}
+        ]
+      },
+      options:{
+        responsive:true,
+        plugins:{ legend:{ labels:{ color:'#a68fc4', font:{family:'IBM Plex Mono', size:11} } } },
+        scales:{
+          x:{ ticks:{ color:'#a68fc4', font:{family:'IBM Plex Mono', size:10} }, grid:{ color:'#3d2154' } },
+          y:{ ticks:{ color:'#a68fc4', font:{family:'IBM Plex Mono', size:10} }, grid:{ color:'#3d2154' }, beginAtZero:true }
+        }
+      }
+    });
+  }
+
+  // speed / deadlines
+  document.getElementById('kpiAvgDays').textContent = d.avgDays!=null ? (Math.round(d.avgDays*10)/10) : '—';
+  document.getElementById('kpiDeadlineRisk').textContent = d.hasDeadlineData ? d.deadlineRisk : '—';
+  document.getElementById('kpiDeadlineRiskSub').textContent = d.hasDeadlineData ? '≤ 7 days to deadline or overdue' : 'no Deadline Date column';
+
+  // reason chart
+  const reasons = Object.keys(d.byReason)
+    .filter(k => (d.byReason[k].won + d.byReason[k].lost) >= 1)
+    .sort((a,b)=> (d.byReason[b].won+d.byReason[b].lost) - (d.byReason[a].won+d.byReason[a].lost))
+    .slice(0, 10);
+  if(state.charts.reason) state.charts.reason.destroy();
+  state.charts.reason = new Chart(document.getElementById('reasonChart'), {
     type:'bar',
     data:{
-      labels: types,
+      labels: reasons,
       datasets:[
-        {label:'Won', data: types.map(t=>d.byType[t].won), backgroundColor:'#22d3a5', borderRadius:4},
-        {label:'Lost', data: types.map(t=>d.byType[t].lost), backgroundColor:'#ff5d7a', borderRadius:4}
+        {label:'Won (Reversed)', data: reasons.map(r=>d.byReason[r].won), backgroundColor:'#22d3a5', borderRadius:4},
+        {label:'Lost (Accepted)', data: reasons.map(r=>d.byReason[r].lost), backgroundColor:'#ff5d7a', borderRadius:4}
       ]
     },
     options:{
       responsive:true,
       plugins:{ legend:{ labels:{ color:'#a68fc4', font:{family:'IBM Plex Mono', size:11} } } },
       scales:{
-        x:{ ticks:{ color:'#a68fc4', font:{family:'IBM Plex Mono', size:10} }, grid:{ color:'#3d2154' }, stacked:false },
+        x:{ ticks:{ color:'#a68fc4', font:{family:'IBM Plex Mono', size:9}, maxRotation:40, minRotation:40 }, grid:{ color:'#3d2154' } },
         y:{ ticks:{ color:'#a68fc4', font:{family:'IBM Plex Mono', size:10} }, grid:{ color:'#3d2154' }, beginAtZero:true }
       }
     }
   });
 
-  // status donut
-  const statuses = Object.keys(d.statusCounts);
-  const palette = ['#c026d3','#7c3aed','#ff5d7a','#fbbf24','#22d3a5','#38bdf8','#f472b6'];
-  if(state.charts.status) state.charts.status.destroy();
-  state.charts.status = new Chart(document.getElementById('statusChart'), {
-    type:'doughnut',
+  // refund-after-dispute block
+  if(d.hasOrderStatus){
+    const refundDecided = d.refundWon + d.refundLost;
+    const refundWr = refundDecided ? (d.refundWon/refundDecided*100) : NaN;
+    document.getElementById('kpiRefundCount').textContent = d.refundTotal;
+    document.getElementById('kpiRefundSub').textContent = d.total ? `${fmtPct(d.refundTotal/d.total*100)} of all disputes` : '—';
+    document.getElementById('kpiRefundWinRate').textContent = fmtPct(refundWr);
+  } else {
+    document.getElementById('kpiRefundCount').textContent = '—';
+    document.getElementById('kpiRefundSub').textContent = 'no Order Status column';
+    document.getElementById('kpiRefundWinRate').textContent = '—';
+  }
+
+  renderIssuers(d);
+}
+
+function renderOverallTrend(){
+  const labels = state.order;
+  const data = labels.map(name=>{
+    const d = state.sheets[name];
+    const decided = d.won + d.lost;
+    return decided ? Math.round(d.won/decided*1000)/10 : null;
+  });
+  if(state.charts.overallTrend) state.charts.overallTrend.destroy();
+  state.charts.overallTrend = new Chart(document.getElementById('overallTrendChart'), {
+    type:'line',
     data:{
-      labels: statuses,
-      datasets:[{ data: statuses.map(s=>d.statusCounts[s]), backgroundColor: statuses.map((_,i)=>palette[i%palette.length]), borderColor:'#20112f', borderWidth:3 }]
+      labels,
+      datasets:[{
+        label:'Win rate %', data,
+        borderColor:'#c026d3', backgroundColor:'rgba(192,38,211,.15)',
+        pointBackgroundColor:'#7c3aed', pointRadius:4, tension:.25, fill:true, spanGaps:true
+      }]
     },
     options:{
       responsive:true,
-      cutout:'62%',
-      plugins:{ legend:{ position:'bottom', labels:{ color:'#a68fc4', font:{family:'IBM Plex Mono', size:10}, boxWidth:10, padding:10 } } }
+      plugins:{ legend:{ display:false } },
+      scales:{
+        x:{ ticks:{ color:'#a68fc4', font:{family:'IBM Plex Mono', size:10} }, grid:{ color:'#3d2154' } },
+        y:{ ticks:{ color:'#a68fc4', font:{family:'IBM Plex Mono', size:10}, callback:v=>v+'%' }, grid:{ color:'#3d2154' }, beginAtZero:true, max:100 }
+      }
     }
-  });
-
-  // reason table
-  const tbody = document.querySelector('#reasonTable tbody');
-  tbody.innerHTML = '';
-  const reasons = Object.keys(d.byReason).sort((a,b)=>{
-    const totA = d.byReason[a].won+d.byReason[a].lost, totB = d.byReason[b].won+d.byReason[b].lost;
-    return totB-totA;
-  });
-  reasons.forEach(r=>{
-    const {won,lost} = d.byReason[r];
-    const tot = won+lost;
-    const pct = tot ? (won/tot*100) : 0;
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r}</td><td class="num">${won}</td><td class="num">${lost}</td>
-      <td class="num"><div class="pct-cell"><span>${fmtPct(pct)}</span><div class="pct-track"><div class="pct-fill" style="width:${pct}%"></div></div></div></td>`;
-    tbody.appendChild(tr);
   });
 }
 
@@ -383,6 +630,9 @@ function buildTabs(){
 function loadWorkbook(wb, filename){
   state.sheets = {}; state.order = [];
   wb.SheetNames.forEach(sn=>{
+    // skip utility/service tabs that aren't monthly dispute exports
+    const skip = /^(dashboard|bin_database|audit)$/i.test(sn.trim()) || sn.trim().startsWith('📊');
+    if(skip) return;
     const ws = wb.Sheets[sn];
     const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
     const processed = processSheet(rows);
@@ -391,11 +641,12 @@ function loadWorkbook(wb, filename){
       state.order.push(sn);
     }
   });
-  if(!state.order.length){ alert('Не удалось найти данные — проверьте, что в таблице есть колонки Status/Outcome (или их аналоги).'); return; }
+  if(!state.order.length){ alert('No usable data found — check that the table has a Status column with values accepted/reversed/document_sent/in_progress.'); return; }
   document.getElementById('fileTitle').textContent = filename;
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('dashboard').style.display = 'block';
   buildTabs();
+  renderOverallTrend();
   renderMonth(state.order[state.order.length-1]);
 }
 
