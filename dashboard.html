@@ -310,6 +310,19 @@
     </div>
 
     <div id="paypalPanels">
+      <div class="kpis" style="grid-template-columns:repeat(2,1fr); margin-bottom:18px;">
+        <div class="kpi win">
+          <div class="label">Win rate (excl. Inquiry &amp; Alert)</div>
+          <div class="value" id="kpiCoreWinRate">—</div>
+          <div class="sub" id="kpiCoreWinRateSub">Internal Inquiry &amp; Alert Chargeback affect fraud rate, not win rate</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Decided cases (core)</div>
+          <div class="value" id="kpiCoreDecided">—</div>
+          <div class="sub" id="kpiCoreDecidedSub">excluding Internal Inquiry &amp; Alert</div>
+        </div>
+      </div>
+
       <div class="panel" style="margin-bottom:18px;">
         <h3>Win rate by dispute type</h3>
         <canvas id="disputeTypeChart"></canvas>
@@ -518,6 +531,7 @@ function processSheetPaypal(rows){
   if(!colMap.outcome && !colMap.status) return null;
 
   let won=0, lost=0, pending=0, canceled=0, other=0;
+  let wonCore=0, lostCore=0; // excludes Internal Inquiry and Alert Chargeback (these skew fraud rate, not real win rate)
   const byDisputeType = {}, byReason = {}, byAmount = {};
   AMOUNT_BUCKETS.forEach(b => byAmount[b.label] = {won:0, lost:0, total:0});
 
@@ -542,6 +556,13 @@ function processSheetPaypal(rows){
     const typeLabel = (dc || ls) ? `${dc} ${ls}`.trim() : 'Unknown';
     bump(byDisputeType, typeLabel, cls);
 
+    const dcNorm = norm(dc), lsNorm = norm(ls);
+    const isExcluded = dcNorm === 'alert' || (dcNorm === 'internal' && lsNorm === 'inquiry');
+    if(!isExcluded){
+      if(cls==='won') wonCore++;
+      else if(cls==='lost') lostCore++;
+    }
+
     const reason = colMap.reason ? (String(row[colMap.reason]||'').trim() || 'Unknown') : 'Unknown';
     bump(byReason, reason, cls);
 
@@ -558,6 +579,7 @@ function processSheetPaypal(rows){
 
   return {
     total: rows.length, won, lost, pending, canceled, other,
+    wonCore, lostCore,
     byDisputeType, byReason, byAmount,
     hasDisputeTypeData: Object.keys(byDisputeType).length > 0,
     hasReasonData: Object.keys(byReason).length > 0,
@@ -780,6 +802,12 @@ function renderCardMonth(d){
 }
 
 function renderPaypalMonth(d){
+  const coreDecided = d.wonCore + d.lostCore;
+  const coreWr = coreDecided ? (d.wonCore/coreDecided*100) : NaN;
+  document.getElementById('kpiCoreWinRate').textContent = fmtPct(coreWr);
+  document.getElementById('kpiCoreDecided').textContent = coreDecided;
+  document.getElementById('kpiCoreDecidedSub').textContent = `${d.wonCore} won · ${d.lostCore} lost (excl. Internal Inquiry & Alert)`;
+
   renderBreakdownTable('disputeTypeTable', d.byDisputeType, 1);
   renderBreakdownTable('paypalReasonTable', d.byReason, 1);
 
