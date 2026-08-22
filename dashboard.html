@@ -232,11 +232,12 @@
 
     <div class="kpis">
       <div class="kpi"><div class="label">Total disputes</div><div class="value" id="kpiTotal">—</div><div class="sub" id="kpiTotalSub">—</div></div>
-      <div class="kpi win"><div class="label">Win rate (Reversed)</div><div class="value" id="kpiWinRate">—</div><div class="sub" id="kpiWinRateSub">—</div></div>
-      <div class="kpi loss"><div class="label">Accepted (lost)</div><div class="value" id="kpiLost">—</div><div class="sub">cases</div></div>
+      <div class="kpi win"><div class="label">Win rate</div><div class="value" id="kpiWinRate">—</div><div class="sub" id="kpiWinRateSub">—</div></div>
+      <div class="kpi loss"><div class="label">Lost</div><div class="value" id="kpiLost">—</div><div class="sub">cases</div></div>
       <div class="kpi pending"><div class="label">Pending</div><div class="value" id="kpiPending">—</div><div class="sub" id="kpiPendingSub">under review</div></div>
     </div>
 
+    <div id="cardPanels">
     <div class="panel" style="margin-bottom:18px;">
       <h3>Win rate by Card Brand</h3>
       <canvas id="brandChart"></canvas>
@@ -306,6 +307,39 @@
         </div>
       </div>
     </div>
+    </div>
+
+    <div id="paypalPanels">
+      <div class="panel" style="margin-bottom:18px;">
+        <h3>Win rate by dispute type</h3>
+        <canvas id="disputeTypeChart"></canvas>
+      </div>
+
+      <div class="grid2">
+        <div class="panel">
+          <h3>Dispute type breakdown</h3>
+          <table class="data" id="disputeTypeTable">
+            <thead><tr><th>Type</th><th class="num">Won</th><th class="num">Lost</th><th class="num">Win rate</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="panel">
+          <h3>Reason breakdown</h3>
+          <table class="data" id="paypalReasonTable">
+            <thead><tr><th>Reason</th><th class="num">Won</th><th class="num">Lost</th><th class="num">Win rate</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px;">
+        <h3>Disputes by amount</h3>
+        <table class="data" id="amountTable">
+          <thead><tr><th>Amount range</th><th class="num">Disputes</th><th class="num">Won</th><th class="num">Lost</th><th class="num">Win rate</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
 
   </div>
 
@@ -359,6 +393,13 @@ function renderSwitchers(){
   const prodLabel = PRODUCTS.find(p=>p.id===currentProduct).label;
   const typeLabel = TYPES.find(t=>t.id===currentType).label;
   document.getElementById('eyebrow').textContent = `${prodLabel} · ${typeLabel}`;
+
+  const cardPanels = document.getElementById('cardPanels');
+  const paypalPanels = document.getElementById('paypalPanels');
+  if(cardPanels && paypalPanels){
+    cardPanels.style.display = currentType === 'card' ? '' : 'none';
+    paypalPanels.style.display = currentType === 'paypal' ? '' : 'none';
+  }
 }
 renderSwitchers();
 
@@ -368,12 +409,11 @@ const GOOGLE_API_KEY = 'AIzaSyAbh_DInbxhe7i4H-2xkwYhVr8Pz_MqIMg';
 // To connect a new combo: paste its ID here, replacing null.
 const SHEET_CONFIG = {
   dramashorts_card:   '13cY1q5ZvsKn_tjoBNLvlQoa1pFM7IM7ug86Tb-rHwag',
-  dramashorts_paypal: null,
+  dramashorts_paypal: '1mO35ZAg5WYgxHsH1y8sT9pvqYg8_e6YSiOR8uhjQFEY',
   alphanovel_card:    null,
   alphanovel_paypal:  null
 };
 
-function configKey(){ return `${currentProduct}_${currentType}`; }
 const state = { sheets: {}, order: [], activeMonth: null, charts: {} };
 
 const COLS = {
@@ -434,6 +474,98 @@ function bump(map, key, cls){
   map[key] = map[key] || {won:0, lost:0};
   map[key][cls]++;
 }
+
+// ---------- PayPal dispute processing ----------
+const PAYPAL_COLS = {
+  status: ['status'],
+  outcome: ['outcome'],
+  reason: ['reason'],
+  disputeChannel: ['dispute channel'],
+  lifecycleStage: ['lifecycle stage'],
+  amount: ['amount']
+};
+const PAYPAL_WON_OUTCOMES = ['resolved_seller_favour','resolved_with_payout','canceled_by_buyer'];
+const PAYPAL_LOST_OUTCOMES = ['resolved_buyer_favour'];
+const PAYPAL_CANCELED_OUTCOMES = [];
+
+const AMOUNT_BUCKETS = [
+  {label:'$0–10', min:0, max:10},
+  {label:'$10–20', min:10, max:20},
+  {label:'$20–50', min:20, max:50},
+  {label:'$50–100', min:50, max:100},
+  {label:'$100+', min:100, max:Infinity}
+];
+
+function parseAmount(v){
+  if(v==null) return null;
+  const m = String(v).match(/[\d,.]+/);
+  if(!m) return null;
+  const n = parseFloat(m[0].replace(/,/g,''));
+  return isNaN(n) ? null : n;
+}
+
+function processSheetPaypal(rows){
+  if(!rows.length) return null;
+  const headers = Object.keys(rows[0]);
+  const colMap = {
+    status: findCol(headers, PAYPAL_COLS.status),
+    outcome: findCol(headers, PAYPAL_COLS.outcome),
+    reason: findCol(headers, PAYPAL_COLS.reason),
+    disputeChannel: findCol(headers, PAYPAL_COLS.disputeChannel),
+    lifecycleStage: findCol(headers, PAYPAL_COLS.lifecycleStage),
+    amount: findCol(headers, PAYPAL_COLS.amount)
+  };
+  if(!colMap.outcome && !colMap.status) return null;
+
+  let won=0, lost=0, pending=0, canceled=0, other=0;
+  const byDisputeType = {}, byReason = {}, byAmount = {};
+  AMOUNT_BUCKETS.forEach(b => byAmount[b.label] = {won:0, lost:0, total:0});
+
+  rows.forEach(row=>{
+    const outcome = norm(colMap.outcome ? row[colMap.outcome] : '');
+    const status = norm(colMap.status ? row[colMap.status] : '');
+    let cls;
+    if(PAYPAL_WON_OUTCOMES.includes(outcome)) cls='won';
+    else if(PAYPAL_LOST_OUTCOMES.includes(outcome)) cls='lost';
+    else if(PAYPAL_CANCELED_OUTCOMES.includes(outcome)) cls='canceled';
+    else if(status.includes('review') || status.includes('pending') || status.includes('open')) cls='pending';
+    else cls='other';
+
+    if(cls==='won') won++;
+    else if(cls==='lost') lost++;
+    else if(cls==='pending') pending++;
+    else if(cls==='canceled') canceled++;
+    else other++;
+
+    const dc = colMap.disputeChannel ? String(row[colMap.disputeChannel]||'').trim() : '';
+    const ls = colMap.lifecycleStage ? String(row[colMap.lifecycleStage]||'').trim() : '';
+    const typeLabel = (dc || ls) ? `${dc} ${ls}`.trim() : 'Unknown';
+    bump(byDisputeType, typeLabel, cls);
+
+    const reason = colMap.reason ? (String(row[colMap.reason]||'').trim() || 'Unknown') : 'Unknown';
+    bump(byReason, reason, cls);
+
+    if(colMap.amount){
+      const amt = parseAmount(row[colMap.amount]);
+      if(amt!=null){
+        const bucket = AMOUNT_BUCKETS.find(b => amt>=b.min && amt<b.max) || AMOUNT_BUCKETS[AMOUNT_BUCKETS.length-1];
+        byAmount[bucket.label].total++;
+        if(cls==='won') byAmount[bucket.label].won++;
+        else if(cls==='lost') byAmount[bucket.label].lost++;
+      }
+    }
+  });
+
+  return {
+    total: rows.length, won, lost, pending, canceled, other,
+    byDisputeType, byReason, byAmount,
+    hasDisputeTypeData: Object.keys(byDisputeType).length > 0,
+    hasReasonData: Object.keys(byReason).length > 0,
+    hasAmountData: colMap.amount != null
+  };
+}
+
+// ---------- data engine ----------
 
 function processSheet(rows){
   if(!rows.length) return null;
@@ -576,13 +708,23 @@ function renderMonth(name){
   const wr = totalDecided ? (d.won/totalDecided*100) : NaN;
 
   document.getElementById('kpiTotal').textContent = d.total;
-  document.getElementById('kpiTotalSub').textContent = `${d.won} reversed · ${d.lost} accepted · ${d.pending} pending`;
   document.getElementById('kpiWinRate').textContent = fmtPct(wr);
   document.getElementById('kpiWinRateSub').textContent = totalDecided ? `of ${totalDecided} decided` : 'no decided cases';
   document.getElementById('kpiLost').textContent = d.lost;
   document.getElementById('kpiPending').textContent = d.pending;
-  document.getElementById('kpiPendingSub').textContent = d.pending ? 'document_sent + in_progress' : 'no pending cases';
 
+  if(currentType === 'card'){
+    document.getElementById('kpiTotalSub').textContent = `${d.won} reversed · ${d.lost} accepted · ${d.pending} pending`;
+    document.getElementById('kpiPendingSub').textContent = d.pending ? 'document_sent + in_progress' : 'no pending cases';
+    renderCardMonth(d);
+  } else {
+    document.getElementById('kpiTotalSub').textContent = `${d.won} won · ${d.lost} lost · ${d.pending} under review`;
+    document.getElementById('kpiPendingSub').textContent = d.pending ? 'under review' : 'no pending cases';
+    renderPaypalMonth(d);
+  }
+}
+
+function renderCardMonth(d){
   renderBreakdownTable('descriptorTable', d.byDescriptor, 1);
   renderBreakdownTable('countryTable', d.byCountry, 1);
   renderBreakdownTable('reasonGroupTable', d.byReasonGroup, 1);
@@ -635,6 +777,64 @@ function renderMonth(name){
   }
 
   renderIssuers(d);
+}
+
+function renderPaypalMonth(d){
+  renderBreakdownTable('disputeTypeTable', d.byDisputeType, 1);
+  renderBreakdownTable('paypalReasonTable', d.byReason, 1);
+
+  // dispute type win rate chart
+  if(state.charts.disputeType) state.charts.disputeType.destroy();
+  if(d.hasDisputeTypeData){
+    const types = Object.keys(d.byDisputeType)
+      .filter(k => (d.byDisputeType[k].won + d.byDisputeType[k].lost) >= 1)
+      .sort((a,b)=> (d.byDisputeType[b].won+d.byDisputeType[b].lost) - (d.byDisputeType[a].won+d.byDisputeType[a].lost));
+    const winRates = types.map(t=>{
+      const {won,lost} = d.byDisputeType[t];
+      const tot = won+lost;
+      return tot ? Math.round(won/tot*1000)/10 : 0;
+    });
+    state.charts.disputeType = new Chart(document.getElementById('disputeTypeChart'), {
+      type:'bar',
+      data:{
+        labels: types,
+        datasets:[{
+          label:'Win rate %', data: winRates,
+          backgroundColor:'#c026d3', borderRadius:6,
+          datalabels: datalabelPct
+        }]
+      },
+      options:{
+        responsive:true,
+        plugins:{ legend:{ display:false } },
+        scales:{
+          x:{ ticks:{ color:'#a68fc4', font:{family:'IBM Plex Mono', size:10.5} }, grid:{ color:'#3d2154' } },
+          y:{ ticks:{ color:'#a68fc4', font:{family:'IBM Plex Mono', size:10}, callback:v=>v+'%' }, grid:{ color:'#3d2154' }, beginAtZero:true, max:100 }
+        }
+      }
+    });
+  }
+
+  // amount breakdown table
+  const amtBody = document.querySelector('#amountTable tbody');
+  if(amtBody){
+    amtBody.innerHTML = '';
+    if(!d.hasAmountData){
+      amtBody.innerHTML = `<tr><td colspan="5" class="empty-row">No Amount column</td></tr>`;
+    } else {
+      AMOUNT_BUCKETS.forEach(b=>{
+        const row = d.byAmount[b.label];
+        if(!row || !row.total) return;
+        const decided = row.won + row.lost;
+        const pct = decided ? (row.won/decided*100) : 0;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${b.label}</td><td class="num">${row.total}</td><td class="num">${row.won}</td><td class="num">${row.lost}</td>
+          <td class="num"><div class="pct-cell"><span>${fmtPct(pct)}</span><div class="pct-track"><div class="pct-fill" style="width:${pct}%"></div></div></div></td>`;
+        amtBody.appendChild(tr);
+      });
+      if(!amtBody.children.length) amtBody.innerHTML = `<tr><td colspan="5" class="empty-row">No data</td></tr>`;
+    }
+  }
 }
 
 function renderOverallTrend(){
@@ -744,7 +944,7 @@ async function loadFromGoogleSheets(){
     state.sheets = {}; state.order = [];
     const results = await Promise.all(monthSheets.map(async sn=>{
       const rows = await fetchSheetValues(spreadsheetId, sn);
-      return { sn, processed: rows.length ? processSheet(rows) : null };
+      return { sn, processed: rows.length ? (currentType === 'card' ? processSheet(rows) : processSheetPaypal(rows)) : null };
     }));
     results.forEach(({sn, processed})=>{
       if(processed){ state.sheets[sn] = processed; state.order.push(sn); }
