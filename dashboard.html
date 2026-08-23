@@ -232,7 +232,7 @@
 
     <div class="kpis">
       <div class="kpi"><div class="label">Total disputes</div><div class="value" id="kpiTotal">—</div><div class="sub" id="kpiTotalSub">—</div></div>
-      <div class="kpi win"><div class="label">Win rate</div><div class="value" id="kpiWinRate">—</div><div class="sub" id="kpiWinRateSub">—</div></div>
+      <div class="kpi win"><div class="label" id="kpiWinRateLabel">Win rate</div><div class="value" id="kpiWinRate">—</div><div class="sub" id="kpiWinRateSub">—</div></div>
       <div class="kpi loss"><div class="label">Lost</div><div class="value" id="kpiLost">—</div><div class="sub">cases</div></div>
       <div class="kpi pending"><div class="label">Pending</div><div class="value" id="kpiPending">—</div><div class="sub" id="kpiPendingSub">under review</div></div>
     </div>
@@ -310,22 +310,18 @@
     </div>
 
     <div id="paypalPanels">
-      <div class="kpis" style="grid-template-columns:repeat(2,1fr); margin-bottom:18px;">
-        <div class="kpi win">
-          <div class="label">Win rate (excl. Inquiry &amp; Alert)</div>
-          <div class="value" id="kpiCoreWinRate">—</div>
-          <div class="sub" id="kpiCoreWinRateSub">Internal Inquiry &amp; Alert Chargeback affect fraud rate, not win rate</div>
-        </div>
-        <div class="kpi">
-          <div class="label">Decided cases (core)</div>
-          <div class="value" id="kpiCoreDecided">—</div>
-          <div class="sub" id="kpiCoreDecidedSub">excluding Internal Inquiry &amp; Alert</div>
-        </div>
-      </div>
-
       <div class="panel" style="margin-bottom:18px;">
         <h3>Win rate by dispute type</h3>
         <canvas id="disputeTypeChart"></canvas>
+      </div>
+
+      <div class="panel" style="margin-bottom:18px;">
+        <h3>Disputes opened after refund</h3>
+        <p style="font-family:var(--mono); font-size:11px; color:var(--muted); margin:-6px 0 14px;">Excludes Alert Chargeback and Internal Inquiry</p>
+        <div class="kpis" style="grid-template-columns:repeat(2,1fr); margin-bottom:0;">
+          <div class="kpi"><div class="label">Count</div><div class="value" id="kpiRefundAfterCount">—</div><div class="sub" id="kpiRefundAfterSub">of core disputes</div></div>
+          <div class="kpi loss"><div class="label">Share</div><div class="value" id="kpiRefundAfterPct">—</div><div class="sub">already refunded before dispute</div></div>
+        </div>
       </div>
 
       <div class="grid2">
@@ -495,7 +491,8 @@ const PAYPAL_COLS = {
   reason: ['reason'],
   disputeChannel: ['dispute channel'],
   lifecycleStage: ['lifecycle stage'],
-  amount: ['amount']
+  amount: ['amount'],
+  orderStatus: ['order status']
 };
 const PAYPAL_WON_OUTCOMES = ['resolved_seller_favour','resolved_with_payout','canceled_by_buyer'];
 const PAYPAL_LOST_OUTCOMES = ['resolved_buyer_favour'];
@@ -526,12 +523,13 @@ function processSheetPaypal(rows){
     reason: findCol(headers, PAYPAL_COLS.reason),
     disputeChannel: findCol(headers, PAYPAL_COLS.disputeChannel),
     lifecycleStage: findCol(headers, PAYPAL_COLS.lifecycleStage),
-    amount: findCol(headers, PAYPAL_COLS.amount)
+    amount: findCol(headers, PAYPAL_COLS.amount),
+    orderStatus: findCol(headers, PAYPAL_COLS.orderStatus)
   };
   if(!colMap.outcome && !colMap.status) return null;
 
   let won=0, lost=0, pending=0, canceled=0, other=0;
-  let wonCore=0, lostCore=0; // excludes Internal Inquiry and Alert Chargeback (these skew fraud rate, not real win rate)
+  let wonCore=0, lostCore=0, totalCore=0, refundAfterCore=0; // "core" excludes Internal Inquiry and Alert Chargeback (these skew fraud rate, not real win rate)
   const byDisputeType = {}, byReason = {}, byAmount = {};
   AMOUNT_BUCKETS.forEach(b => byAmount[b.label] = {won:0, lost:0, total:0});
 
@@ -559,8 +557,10 @@ function processSheetPaypal(rows){
     const dcNorm = norm(dc), lsNorm = norm(ls);
     const isExcluded = dcNorm === 'alert' || (dcNorm === 'internal' && lsNorm === 'inquiry');
     if(!isExcluded){
+      totalCore++;
       if(cls==='won') wonCore++;
       else if(cls==='lost') lostCore++;
+      if(colMap.orderStatus && norm(row[colMap.orderStatus]) === 'refunded') refundAfterCore++;
     }
 
     const reason = colMap.reason ? (String(row[colMap.reason]||'').trim() || 'Unknown') : 'Unknown';
@@ -579,7 +579,8 @@ function processSheetPaypal(rows){
 
   return {
     total: rows.length, won, lost, pending, canceled, other,
-    wonCore, lostCore,
+    wonCore, lostCore, totalCore, refundAfterCore,
+    hasOrderStatus: !!colMap.orderStatus,
     byDisputeType, byReason, byAmount,
     hasDisputeTypeData: Object.keys(byDisputeType).length > 0,
     hasReasonData: Object.keys(byReason).length > 0,
@@ -726,20 +727,27 @@ function renderMonth(name){
     t.classList.toggle('active', t.dataset.month===name);
   });
   const d = state.sheets[name];
-  const totalDecided = d.won + d.lost;
-  const wr = totalDecided ? (d.won/totalDecided*100) : NaN;
 
   document.getElementById('kpiTotal').textContent = d.total;
-  document.getElementById('kpiWinRate').textContent = fmtPct(wr);
-  document.getElementById('kpiWinRateSub').textContent = totalDecided ? `of ${totalDecided} decided` : 'no decided cases';
   document.getElementById('kpiLost').textContent = d.lost;
   document.getElementById('kpiPending').textContent = d.pending;
 
   if(currentType === 'card'){
+    const totalDecided = d.won + d.lost;
+    const wr = totalDecided ? (d.won/totalDecided*100) : NaN;
+    document.getElementById('kpiWinRate').textContent = fmtPct(wr);
+    document.getElementById('kpiWinRateLabel').textContent = 'Win rate';
+    document.getElementById('kpiWinRateSub').textContent = totalDecided ? `of ${totalDecided} decided` : 'no decided cases';
     document.getElementById('kpiTotalSub').textContent = `${d.won} reversed · ${d.lost} accepted · ${d.pending} pending`;
     document.getElementById('kpiPendingSub').textContent = d.pending ? 'document_sent + in_progress' : 'no pending cases';
     renderCardMonth(d);
   } else {
+    // main Win rate KPI shows the core rate (excl. Alert Chargeback & Internal Inquiry) — the real chargeback win rate
+    const coreDecided = d.wonCore + d.lostCore;
+    const coreWr = coreDecided ? (d.wonCore/coreDecided*100) : NaN;
+    document.getElementById('kpiWinRate').textContent = fmtPct(coreWr);
+    document.getElementById('kpiWinRateLabel').textContent = 'Win rate (excl. Alert & Inquiry)';
+    document.getElementById('kpiWinRateSub').textContent = coreDecided ? `of ${coreDecided} decided` : 'no decided cases';
     document.getElementById('kpiTotalSub').textContent = `${d.won} won · ${d.lost} lost · ${d.pending} under review`;
     document.getElementById('kpiPendingSub').textContent = d.pending ? 'under review' : 'no pending cases';
     renderPaypalMonth(d);
@@ -802,11 +810,16 @@ function renderCardMonth(d){
 }
 
 function renderPaypalMonth(d){
-  const coreDecided = d.wonCore + d.lostCore;
-  const coreWr = coreDecided ? (d.wonCore/coreDecided*100) : NaN;
-  document.getElementById('kpiCoreWinRate').textContent = fmtPct(coreWr);
-  document.getElementById('kpiCoreDecided').textContent = coreDecided;
-  document.getElementById('kpiCoreDecidedSub').textContent = `${d.wonCore} won · ${d.lostCore} lost (excl. Internal Inquiry & Alert)`;
+  if(d.hasOrderStatus){
+    const pct = d.totalCore ? (d.refundAfterCore/d.totalCore*100) : NaN;
+    document.getElementById('kpiRefundAfterCount').textContent = d.refundAfterCore;
+    document.getElementById('kpiRefundAfterSub').textContent = `of ${d.totalCore} core disputes`;
+    document.getElementById('kpiRefundAfterPct').textContent = fmtPct(pct);
+  } else {
+    document.getElementById('kpiRefundAfterCount').textContent = '—';
+    document.getElementById('kpiRefundAfterSub').textContent = 'no Order status column';
+    document.getElementById('kpiRefundAfterPct').textContent = '—';
+  }
 
   renderBreakdownTable('disputeTypeTable', d.byDisputeType, 1);
   renderBreakdownTable('paypalReasonTable', d.byReason, 1);
@@ -933,18 +946,42 @@ function showEmpty(stamp, title, text){
   document.getElementById('emptyText').textContent = text;
 }
 
+function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+async function fetchWithRetry(url, attempts=3){
+  let lastErr;
+  for(let i=0;i<attempts;i++){
+    try{
+      const res = await fetch(url);
+      if(res.ok) return res;
+      // retry on rate-limit / transient server errors, fail fast on real permission/config errors
+      if([429,500,502,503,504].includes(res.status) && i < attempts-1){
+        await sleep(400 * (i+1));
+        continue;
+      }
+      throw new Error(`HTTP ${res.status}`);
+    }catch(err){
+      lastErr = err;
+      if(i < attempts-1){ await sleep(400 * (i+1)); continue; }
+    }
+  }
+  throw lastErr || new Error('Request failed');
+}
+
 async function fetchSheetNames(spreadsheetId){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?key=${GOOGLE_API_KEY}&fields=sheets.properties.title`;
-  const res = await fetch(url);
-  if(!res.ok) throw new Error(`Could not read sheet list (${res.status})`);
+  let res;
+  try{ res = await fetchWithRetry(url); }
+  catch(e){ throw new Error(`Could not read sheet list (${e.message})`); }
   const json = await res.json();
   return (json.sheets || []).map(s => s.properties.title);
 }
 
 async function fetchSheetValues(spreadsheetId, sheetName){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}?key=${GOOGLE_API_KEY}`;
-  const res = await fetch(url);
-  if(!res.ok) throw new Error(`Could not read tab "${sheetName}" (${res.status})`);
+  let res;
+  try{ res = await fetchWithRetry(url); }
+  catch(e){ throw new Error(`Could not read tab "${sheetName}" (${e.message})`); }
   const json = await res.json();
   const values = json.values || [];
   if(values.length < 2) return [];
@@ -987,7 +1024,15 @@ async function loadFromGoogleSheets(){
     document.getElementById('savedNote').textContent = `Live from Google Sheets · updated ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
   }catch(err){
     console.error(err);
-    showEmpty('ERROR', 'Could not load data', `${err.message}. Check that the sheet is shared as "Anyone with the link — Viewer" and the API key is valid.`);
+    showEmpty('ERROR', 'Could not load data — retrying automatically', `${err.message}. If this keeps happening, check that the sheet is shared as "Anyone with the link — Viewer" and the API key is valid.`);
+    // one more automatic full retry after a short pause, in case the first attempt hit a transient hiccup
+    if(!loadFromGoogleSheets._retried){
+      loadFromGoogleSheets._retried = true;
+      await sleep(1500);
+      loadFromGoogleSheets();
+    } else {
+      loadFromGoogleSheets._retried = false;
+    }
   }
 }
 
